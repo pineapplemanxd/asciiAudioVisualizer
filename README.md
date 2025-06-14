@@ -25,10 +25,3 @@ A simple Win32 C++ audio visualizer that displays a white ASCII-style vertical b
 
 ---
 
-## Building
-
-1. Clone the repository:
-
-   ```bash
-   git clone https://github.com/yourusername/ascii-audio-visualizer.git
-   cd ascii-audio-visualizer
