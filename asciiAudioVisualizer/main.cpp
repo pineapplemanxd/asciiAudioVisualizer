@@ -1,149 +1,245 @@
-﻿#include <windows.h>
+﻿// ascii_audio_visualizer.cpp
+#include <windows.h>
 #include <audioclient.h>
 #include <mmdeviceapi.h>
+#include <avrt.h>
+#include <thread>
+#include <vector>
+#include <iostream>
+#include <cmath>
 #include <winrt/Windows.Media.Control.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <string>
-#include <thread>
-#include <chrono>
-#include <random>
-#include <iostream>
 
 #pragma comment(lib, "Ole32.lib")
+#pragma comment(lib, "Avrt.lib")
+#pragma comment(lib, "Winmm.lib")
 
 using namespace winrt;
 using namespace Windows::Media::Control;
 using namespace Windows::Foundation;
 
-constexpr int WINDOW_WIDTH = 800;
-constexpr int WINDOW_HEIGHT = 200;
-constexpr int NUM_BARS = 64;
+#define BAR_COUNT 100
+#define REFRESH_MS 30
 
+int barWidthMultiplier = 1;  // Width multiplier for each bar
+int barSpread = 1;           // Bar spacing
+float sensitivity = 5.0f;    // Adjust this for responsiveness
+
+HWND hWnd;
 std::wstring currentTitle = L"";
 std::wstring currentArtist = L"";
+int barHeights[BAR_COUNT] = { 0 };
 
-// Simulate bar height (replace this later with real WASAPI loopback analysis)
-int mockBarHeight() {
-    static std::default_random_engine e{ std::random_device{}() };
-    static std::uniform_int_distribution<int> dist(0, 20);
-    return dist(e);
-}
-
-// Convert wide string to narrow
-std::string ws2s(const std::wstring& wstr) {
-    int size_needed = WideCharToMultiByte(CP_UTF8, 0, wstr.data(), (int)wstr.size(), nullptr, 0, nullptr, nullptr);
-    std::string str(size_needed, 0);
-    WideCharToMultiByte(CP_UTF8, 0, wstr.data(), (int)wstr.size(), &str[0], size_needed, nullptr, nullptr);
-    return str;
-}
-
+// Fetch media title & artist from SMTC
 void FetchSMTCMetadata() {
     init_apartment();
-
-    GlobalSystemMediaTransportControlsSessionManager manager =
-        GlobalSystemMediaTransportControlsSessionManager::RequestAsync().get();
-
-    auto sessions = manager.GetSessions();
-    if (sessions.Size() > 0) {
-        auto session = sessions.GetAt(0);
-        if (session) {
-            auto info = session.TryGetMediaPropertiesAsync().get();
-            currentTitle = info.Title();
-            currentArtist = info.Artist();
+    try {
+        auto manager = GlobalSystemMediaTransportControlsSessionManager::RequestAsync().get();
+        auto sessions = manager.GetSessions();
+        if (sessions.Size() > 0) {
+            auto session = sessions.GetAt(0);
+            if (session) {
+                auto info = session.TryGetMediaPropertiesAsync().get();
+                currentTitle = info.Title();
+                currentArtist = info.Artist();
+            }
         }
+    }
+    catch (...) {
+        currentTitle = L"";
+        currentArtist = L"";
+    }
+}
+
+// Set layered + transparent window style
+void SetWindowStyles(HWND hwnd) {
+    LONG exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
+    exStyle |= WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW;
+    SetWindowLong(hwnd, GWL_EXSTYLE, exStyle);
+    SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
+    SetWindowPos(hwnd, HWND_BOTTOM, 0, 0, 0, 0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
+// Audio loop using WASAPI loopback
+void AudioLoop() {
+    CoInitialize(nullptr);
+
+    IMMDeviceEnumerator* enumerator = nullptr;
+    IMMDevice* device = nullptr;
+    IAudioClient* client = nullptr;
+    IAudioCaptureClient* capture = nullptr;
+    WAVEFORMATEX* format;
+
+    CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+        __uuidof(IMMDeviceEnumerator), (void**)&enumerator);
+    enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &device);
+    device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, (void**)&client);
+    client->GetMixFormat(&format);
+    client->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK,
+        10000000, 0, format, nullptr);
+    client->GetService(__uuidof(IAudioCaptureClient), (void**)&capture);
+    client->Start();
+
+    UINT32 frames;
+    BYTE* data;
+    UINT32 packet;
+    DWORD flags;
+
+    while (true) {
+        capture->GetNextPacketSize(&packet);
+        while (packet != 0) {
+            capture->GetBuffer(&data, &frames, &flags, nullptr, nullptr);
+            float* samples = (float*)data;
+            int count = frames * format->nChannels;
+
+            float total = 0;
+            for (int i = 0; i < count; i++)
+                total += fabs(samples[i]);
+            total /= count;
+
+            int volume = static_cast<int>(total * 100 * sensitivity);
+            int barLevel = min(volume / 2, 20);
+
+            for (int i = 0; i < BAR_COUNT; ++i) {
+                int target = rand() % (barLevel + 1);
+                barHeights[i] = (barHeights[i] + target) / 2;
+                if (barLevel == 0)
+                    barHeights[i] = max(barHeights[i] - 1, 1); // smooth minimum
+            }
+
+            capture->ReleaseBuffer(frames);
+            capture->GetNextPacketSize(&packet);
+        }
+
+        InvalidateRect(hWnd, nullptr, FALSE);  // Avoid background erase
+        std::this_thread::sleep_for(std::chrono::milliseconds(REFRESH_MS));
+    }
+
+    client->Stop();
+    capture->Release();
+    client->Release();
+    device->Release();
+    enumerator->Release();
+    CoUninitialize();
+}
+
+void DrawBars(HDC hdc, int width, int height) {
+    int barWidth = max(1, (width / BAR_COUNT) * barWidthMultiplier);
+
+    for (int i = 0; i < BAR_COUNT; ++i) {
+        int x = i * (barWidth + barSpread);
+        int barHeight = barHeights[i] * 4;
+        RECT rect = { x, height / 2 - barHeight, x + barWidth - 2, height / 2 + barHeight };
+        FillRect(hdc, &rect, (HBRUSH)GetStockObject(WHITE_BRUSH));
+    }
+
+    std::wstring meta = currentTitle + L" - " + currentArtist;
+    if (!meta.empty()) {
+        SetTextColor(hdc, RGB(255, 255, 255));
+        SetBkMode(hdc, TRANSPARENT);
+        HFONT font = CreateFont(18, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+            ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
+            FF_DONTCARE, L"Consolas");
+        SelectObject(hdc, font);
+
+        SIZE size;
+        GetTextExtentPoint32W(hdc, meta.c_str(), (int)meta.length(), &size);
+        TextOutW(hdc, (width - size.cx) / 2, height - 30, meta.c_str(), (int)meta.length());
+
+        DeleteObject(font);
     }
 }
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
-    case WM_PAINT: {
+    case WM_PAINT:
+    {
         PAINTSTRUCT ps;
         HDC hdc = BeginPaint(hwnd, &ps);
 
-        // Fill black background
-        FillRect(hdc, &ps.rcPaint, CreateSolidBrush(RGB(0, 0, 0)));
+        RECT rect;
+        GetClientRect(hwnd, &rect);
+        int width = rect.right - rect.left;
+        int height = rect.bottom - rect.top;
 
-        // Draw ASCII visualizer bars
-        SetBkMode(hdc, TRANSPARENT);
-        SetTextColor(hdc, RGB(0, 255, 0));
-        HFONT hFont = CreateFont(18, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-            ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-            DEFAULT_QUALITY, FF_DONTCARE, L"Consolas");
-        SelectObject(hdc, hFont);
+        // Create a compatible memory DC
+        HDC memDC = CreateCompatibleDC(hdc);
+        HBITMAP memBitmap = CreateCompatibleBitmap(hdc, width, height);
+        HBITMAP oldBitmap = (HBITMAP)SelectObject(memDC, memBitmap);
 
-        int barWidth = WINDOW_WIDTH / NUM_BARS;
-        for (int i = 0; i < NUM_BARS; ++i) {
-            int height = mockBarHeight();
-            for (int j = 0; j < height; ++j) {
-                TextOutA(hdc, i * barWidth, WINDOW_HEIGHT / 2 - j * 10, "|", 1);
-                TextOutA(hdc, i * barWidth, WINDOW_HEIGHT / 2 + j * 10, "|", 1);
-            }
-        }
+        // Fill background black in memDC
+        HBRUSH blackBrush = (HBRUSH)GetStockObject(BLACK_BRUSH);
+        FillRect(memDC, &rect, blackBrush);
 
-        // Show SMTC metadata centered at bottom
-        std::wstring meta = currentTitle + L" - " + currentArtist;
-        SIZE textSize;
-        GetTextExtentPoint32W(hdc, meta.c_str(), (int)meta.length(), &textSize);
-        TextOutW(hdc, (WINDOW_WIDTH - textSize.cx) / 2, WINDOW_HEIGHT - 30, meta.c_str(), (int)meta.length());
+        // Draw your bars and metadata text on memDC instead of hdc
+        DrawBars(memDC, width, height);
+
+        // Copy the off-screen buffer to the window DC
+        BitBlt(hdc, 0, 0, width, height, memDC, 0, 0, SRCCOPY);
+
+        // Cleanup
+        SelectObject(memDC, oldBitmap);
+        DeleteObject(memBitmap);
+        DeleteDC(memDC);
 
         EndPaint(hwnd, &ps);
-        DeleteObject(hFont);
-        break;
+        return 0;
     }
+
+
+    case WM_ERASEBKGND:
+        return TRUE;  // Prevent background flicker
     case WM_DESTROY:
         PostQuitMessage(0);
         return 0;
-    default: return DefWindowProc(hwnd, msg, wParam, lParam);
     }
-    return 0;
+    return DefWindowProc(hwnd, msg, wParam, lParam);
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     init_apartment();
 
+    const wchar_t CLASS_NAME[] = L"ASCIIVisualizerWindow";
     WNDCLASS wc = {};
     wc.lpfnWndProc = WndProc;
     wc.hInstance = hInstance;
-    wc.lpszClassName = L"AudioVisClass";
-    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.hbrBackground = nullptr;
+    wc.lpszClassName = CLASS_NAME;
     RegisterClass(&wc);
 
-    HWND hwnd = CreateWindowEx(
-        WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-        wc.lpszClassName, L"",
-        WS_POPUP,
-        100, 100, WINDOW_WIDTH, WINDOW_HEIGHT,
-        nullptr, nullptr, hInstance, nullptr
-    );
+    int width = 400;
+    int height = 200;
+    int x = GetSystemMetrics(SM_CXSCREEN) - width;
+    int y = 0;
 
-    // Set always on bottom
-    SetWindowPos(hwnd, HWND_BOTTOM, 0, 800, WINDOW_WIDTH, WINDOW_HEIGHT, SWP_SHOWWINDOW);
+    hWnd = CreateWindowEx(
+        WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_TRANSPARENT,
+        CLASS_NAME, L"", WS_POPUP,
+        x, y, width, height,
+        nullptr, nullptr, hInstance, nullptr);
 
-    // Make click-through
-    LONG exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
-    SetWindowLong(hwnd, GWL_EXSTYLE, exStyle | WS_EX_LAYERED | WS_EX_TRANSPARENT);
-    SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
+    SetLayeredWindowAttributes(hWnd, 0, 255, LWA_ALPHA);
+    ShowWindow(hWnd, SW_SHOW);
+    UpdateWindow(hWnd);
+    SetWindowStyles(hWnd);
 
-    ShowWindow(hwnd, SW_SHOW);
+    std::thread audioThread(AudioLoop);
+    audioThread.detach();
 
-    std::thread metadataThread([] {
+    std::thread metaThread([] {
         while (true) {
             FetchSMTCMetadata();
             std::this_thread::sleep_for(std::chrono::seconds(2));
         }
         });
-    metadataThread.detach();
+    metaThread.detach();
 
     MSG msg = {};
-    while (true) {
-        while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
-            if (msg.message == WM_QUIT) return 0;
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
-        }
-        InvalidateRect(hwnd, nullptr, FALSE);
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    while (GetMessage(&msg, nullptr, 0, 0)) {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
     }
 
     return 0;
