@@ -14,7 +14,7 @@ A simple Win32 C++ audio visualizer that displays a white ASCII-style vertical b
 - Flicker-free rendering using **double buffering**
 
 ---
-##preview
+## preview
 full screen:
 https://github.com/user-attachments/assets/639e2d75-bbe3-4a38-af24-5bf0528cc781
 
