@@ -18,5 +18,24 @@
     <ClCompile Include="main.cpp">
       <Filter>Pliki źródłowe</Filter>
     </ClCompile>
+    <ClCompile Include="config.cpp">
+      <Filter>Pliki źródłowe</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="resource.rc">
+      <Filter>Pliki zasobów</Filter>
+    </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="resource.h">
+      <Filter>Pliki nagłówkowe</Filter>
+    </ClInclude>
+    <ClInclude Include="config.h">
+      <Filter>Pliki nagłówkowe</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="settings.txt" />
   </ItemGroup>
 </Project>

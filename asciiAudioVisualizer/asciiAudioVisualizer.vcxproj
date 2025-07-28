@@ -124,7 +124,18 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="config.cpp" />
     <ClCompile Include="main.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="resource.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="config.h" />
+    <ClInclude Include="resource.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="settings.txt" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
