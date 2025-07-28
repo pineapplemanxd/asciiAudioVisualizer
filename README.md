@@ -17,6 +17,7 @@ A simple Win32 C++ audio visualizer that displays a white ASCII-style vertical b
 ##preview
 full screen:
 https://github.com/user-attachments/assets/639e2d75-bbe3-4a38-af24-5bf0528cc781
+
 just visualizer:
 https://github.com/user-attachments/assets/a9ee1cce-9070-4f53-b7ff-f78ed19cb243
 
