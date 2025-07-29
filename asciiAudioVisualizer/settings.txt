@@ -1,9 +1,10 @@
-sensitivity = 300
+sensitivity = 40
 barWidthMultiplier = 1
 barSpread = 1
 barCount = 80
-barColor = #ffffff
-windowPosX = 1500
+barColor = #00000f
+textColor = #00000f
+windowPosX = 1550
 windowPosY = 0
 windowWidth = 400
 windowHeight = 200

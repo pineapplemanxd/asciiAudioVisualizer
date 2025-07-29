@@ -1,15 +1,15 @@
 #include "config.h"
 #include <fstream>
 #include <sstream>
-
 #include <iomanip>
 #include "config.h"
-extern HWND hWnd; // tylko deklaracja, nie definicja
+extern HWND hWnd;
 float sensitivity = 200.0f;
 int barWidthMultiplier = 1;
 int barSpread = 1;
 int barCount = 80;
 COLORREF barColor = RGB(255, 255, 255);
+COLORREF textColor = RGB(255, 255, 255);
 int windowPosY = 0;
 int windowPosX = 1500;
 int windowWidth = 400;
@@ -27,7 +27,7 @@ std::wstring ColorRefToHex(unsigned long color) {
 unsigned long HexToColorRef(const wchar_t* hexStr) {
     unsigned long color = 0;
     if (hexStr[0] == L'#') {
-        ++hexStr;  // pomiñ #
+        ++hexStr;
     }
     std::wistringstream iss(hexStr);
     iss >> std::hex >> color;
@@ -48,7 +48,8 @@ void LoadSettingsFromFile() {
         else if (key == L"barWidthMultiplier") barWidthMultiplier = std::stoi(value);
         else if (key == L"barSpread") barSpread = std::stoi(value);
         else if (key == L"barCount") barCount = std::stoi(value);
-        else if (key == L"barColor") barColor = HexToColorRef(value.c_str());  // <-- tu zmiana
+        else if (key == L"barColor") barColor = HexToColorRef(value.c_str());
+        else if (key == L"textColor") textColor = HexToColorRef(value.c_str());
         else if (key == L"windowPosX") windowPosX = std::stoi(value);
         else if (key == L"windowPosY") windowPosY = std::stoi(value);
         else if (key == L"windowWidth") windowWidth = std::stoi(value);
@@ -56,7 +57,6 @@ void LoadSettingsFromFile() {
         else if (key == L"topMost") topMost = (value == L"1");
     }
 }
-
 
 void SaveSettingsToFile() {
     std::wofstream file(L"settings.txt");
@@ -67,6 +67,7 @@ void SaveSettingsToFile() {
     file << L"barSpread = " << barSpread << L"\n";
     file << L"barCount = " << barCount << L"\n";
     file << L"barColor = " << ColorRefToHex(barColor) << L"\n";
+    file << L"textColor = " << ColorRefToHex(textColor) << L"\n";
     file << L"windowPosX = " << windowPosX << L"\n";
     file << L"windowPosY = " << windowPosY << L"\n";
     file << L"windowWidth = " << windowWidth << L"\n";

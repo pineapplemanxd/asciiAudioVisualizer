@@ -14,6 +14,7 @@
 #include <winrt/Windows.Foundation.Collections.h>
 #include "resource.h"
 #include "config.h"
+
 HWND hWnd = nullptr;
 #pragma comment(lib, "Ole32.lib")
 #pragma comment(lib, "Avrt.lib")
@@ -28,10 +29,6 @@ using namespace Windows::Foundation;
 #define WM_TRAYICON (WM_USER + 1)
 #define ID_TRAY_SETTINGS 2001
 #define ID_TRAY_EXIT 2002
-
-#define IDC_EDIT_POSX 109
-#define IDC_EDIT_WIDTH 110
-#define IDC_EDIT_HEIGHT 111
 
 void CreateSettingsWindow(HWND parent);
 void ApplySettings(HWND hwndDlg);
@@ -75,7 +72,9 @@ void SetWindowStyles(HWND hwnd) {
     LONG exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
     exStyle |= WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW;
     SetWindowLong(hwnd, GWL_EXSTYLE, exStyle);
-    SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
+    
+    // Use LWA_COLORKEY instead of LWA_ALPHA for better text rendering
+    SetLayeredWindowAttributes(hwnd, RGB(0, 0, 0), 0, LWA_COLORKEY);
 
     SetWindowPos(hwnd, topMost ? HWND_TOPMOST : HWND_BOTTOM,
         windowPosX, windowPosY, windowWidth, windowHeight,
@@ -169,24 +168,31 @@ void AudioLoop() {
 void DrawBars(HDC hdc, int width, int height) {
     std::lock_guard<std::mutex> lock(configMutex);
 
+    // Clear the background completely
+    HBRUSH bgBrush = CreateSolidBrush(RGB(0, 0, 0));
+    RECT bgRect = { 0, 0, width, height };
+    FillRect(hdc, &bgRect, bgBrush);
+    DeleteObject(bgBrush);
+
+    // Draw the bars
     int totalSpacing = (barCount - 1) * barSpread;
     int barWidth = max(1, ((width - totalSpacing) / barCount) * barWidthMultiplier);
 
-    HBRUSH brush = CreateSolidBrush(barColor);
-
+    HBRUSH barBrush = CreateSolidBrush(barColor);
     for (int i = 0; i < barCount; ++i) {
         int x = i * (barWidth + barSpread);
         int barHeight = barHeights.size() > i ? barHeights[i] * 4 : 0;
         RECT rect = { x, height / 2 - barHeight, x + barWidth - 2, height / 2 + barHeight };
-        FillRect(hdc, &rect, brush);
+        FillRect(hdc, &rect, barBrush);
     }
+    DeleteObject(barBrush);
 
-    DeleteObject(brush);
-
+    // Draw the text
     std::wstring meta = currentTitle + L" - " + currentArtist;
     if (!meta.empty()) {
-        SetTextColor(hdc, RGB(255, 255, 255));
         SetBkMode(hdc, TRANSPARENT);
+        SetTextColor(hdc, textColor);
+
         HFONT font = CreateFont(18, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
             ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
             FF_DONTCARE, L"Consolas");
@@ -194,6 +200,21 @@ void DrawBars(HDC hdc, int width, int height) {
 
         SIZE size;
         GetTextExtentPoint32W(hdc, meta.c_str(), (int)meta.length(), &size);
+
+        // Create a temporary rectangle for the text background
+        RECT textRect = {
+            (width - size.cx) / 2 - 2,
+            height - 30 - 2,
+            (width + size.cx) / 2 + 2,
+            height - 30 + size.cy + 2
+        };
+
+        // Fill the text background with the same color as your window background
+        HBRUSH textBgBrush = CreateSolidBrush(RGB(0, 0, 0));
+        FillRect(hdc, &textRect, textBgBrush);
+        DeleteObject(textBgBrush);
+
+        // Draw the text
         TextOutW(hdc, (width - size.cx) / 2, height - 30, meta.c_str(), (int)meta.length());
 
         SelectObject(hdc, oldFont);
@@ -214,13 +235,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         HBITMAP memBmp = CreateCompatibleBitmap(hdc, rc.right, rc.bottom);
         HBITMAP oldBmp = (HBITMAP)SelectObject(memDC, memBmp);
 
-
-        HBRUSH brush = CreateSolidBrush(RGB(0, 0, 0));
-        FillRect(memDC, &rc, brush);
-        DeleteObject(brush);
-
+        // Draw everything to the memory DC
         DrawBars(memDC, rc.right, rc.bottom);
 
+        // Copy to screen
         BitBlt(hdc, 0, 0, rc.right, rc.bottom, memDC, 0, 0, SRCCOPY);
 
         SelectObject(memDC, oldBmp);
@@ -228,12 +246,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         DeleteDC(memDC);
 
         EndPaint(hwnd, &ps);
-
-
-        SetLayeredWindowAttributes(hwnd, RGB(0, 0, 0), 0, LWA_COLORKEY);
     }
     break;
-
     break;
 
     case WM_TRAYICON:
@@ -294,6 +308,7 @@ INT_PTR CALLBACK SettingsWndProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM 
         swprintf_s(buf, L"%d", barSpread); SetDlgItemText(hwndDlg, IDC_EDIT_SPACING, buf);
         swprintf_s(buf, L"%d", barCount); SetDlgItemText(hwndDlg, IDC_EDIT_BARCOUNT, buf);
         SetDlgItemText(hwndDlg, IDC_EDIT_BARCOLOR, ColorRefToHex(barColor).c_str());
+        SetDlgItemText(hwndDlg, IDC_EDIT_TEXTCOLOR, ColorRefToHex(textColor).c_str());
         swprintf_s(buf, L"%d", windowPosY); SetDlgItemText(hwndDlg, IDC_EDIT_POSY, buf);
         swprintf_s(buf, L"%d", windowPosX); SetDlgItemText(hwndDlg, IDC_EDIT_POSX, buf);
         swprintf_s(buf, L"%d", windowWidth); SetDlgItemText(hwndDlg, IDC_EDIT_WIDTH, buf);
@@ -321,6 +336,7 @@ INT_PTR CALLBACK SettingsWndProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM 
     }
     return FALSE;
 }
+
 void ApplySettings(HWND hwndDlg) {
     wchar_t buf[64];
 
@@ -329,6 +345,7 @@ void ApplySettings(HWND hwndDlg) {
     GetDlgItemText(hwndDlg, IDC_EDIT_SPACING, buf, 64); int newSpacing = _wtoi(buf);
     GetDlgItemText(hwndDlg, IDC_EDIT_BARCOUNT, buf, 64); int newBarCount = _wtoi(buf);
     GetDlgItemText(hwndDlg, IDC_EDIT_BARCOLOR, buf, 64); COLORREF newBarColor = HexToColorRef(buf);
+    GetDlgItemText(hwndDlg, IDC_EDIT_TEXTCOLOR, buf, 64); COLORREF newTextColor = HexToColorRef(buf);
     GetDlgItemText(hwndDlg, IDC_EDIT_POSY, buf, 64); int newPosY = _wtoi(buf);
     GetDlgItemText(hwndDlg, IDC_EDIT_POSX, buf, 64); int newPosX = _wtoi(buf);
     GetDlgItemText(hwndDlg, IDC_EDIT_WIDTH, buf, 64); int newWidth = _wtoi(buf);
@@ -346,6 +363,7 @@ void ApplySettings(HWND hwndDlg) {
         if (newPosX >= 0) windowPosX = newPosX;
         if (newPosY >= 0) windowPosY = newPosY;
         barColor = newBarColor;
+        textColor = newTextColor;
         topMost = newTopMost;
 
         SaveSettingsToFile();
@@ -386,7 +404,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
 
     std::thread audioThread(AudioLoop);
     audioThread.detach();
-
 
     SetTimer(hWnd, 1, 1000, NULL);
 

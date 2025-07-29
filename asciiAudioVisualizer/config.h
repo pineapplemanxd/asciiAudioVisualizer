@@ -1,5 +1,3 @@
-// config.h
-
 #pragma once
 #include <Windows.h>
 extern HWND hWnd;
@@ -9,6 +7,7 @@ extern int barWidthMultiplier;
 extern int barSpread;
 extern int barCount;
 extern COLORREF barColor;
+extern COLORREF textColor;
 extern int windowPosY;
 extern int windowPosX;
 extern int windowWidth;
